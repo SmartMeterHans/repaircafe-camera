@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foto maken — Repair Café Nieuw Amsterdam</title>
+<style>
+  :root{--navy:#12294a;--line:#d8d2c6;--paper:#f6f3ee;--muted:#6b6558;--rood:#b3311c;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--paper);color:#222;}
+  .box{max-width:820px;margin:0 auto;padding:14px 16px;display:grid;gap:10px;}
+  h1{margin:0;font-size:1.15rem;color:var(--navy);}
+  .sub{margin:0;color:var(--muted);font-size:.9rem;}
+  video,#voorbeeld{width:100%;max-height:62vh;background:#000;border-radius:6px;object-fit:contain;display:block;}
+  #voorbeeld{display:none;}
+  .rij{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+  select{flex:1 1 200px;min-width:0;padding:8px;font-size:1rem;border:1px solid var(--line);border-radius:4px;background:#fff;}
+  button{font:inherit;font-weight:700;padding:10px 16px;border-radius:6px;border:1px solid var(--navy);cursor:pointer;background:#fff;color:var(--navy);}
+  button.primair{background:var(--navy);color:#fff;}
+  button:disabled{opacity:.45;cursor:default;}
+  .fout{color:var(--rood);font-weight:700;display:none;}
+  .info{color:var(--muted);font-size:.9rem;display:none;}
+  a.dl{display:none;font-weight:700;color:var(--navy);}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1 id="titel">Foto maken</h1>
+  <p class="sub">Richt de camera, druk op <strong>Foto nemen</strong> en kies daarna <strong>Gebruiken</strong>. Dit venster sluit dan vanzelf en de foto staat in de Diagnosehulp.</p>
+  <video id="video" autoplay playsinline muted></video>
+  <img id="voorbeeld" alt="Voorbeeld van de foto">
+  <div class="fout" id="fout"></div>
+  <div class="info" id="info"></div>
+  <a class="dl" id="dl" download="foto.jpg">Foto opslaan als bestand</a>
+  <div class="rij">
+    <select id="keuze" style="display:none;" aria-label="Kies camera"></select>
+    <button type="button" class="primair" id="neem" disabled>Foto nemen</button>
+    <button type="button" class="primair" id="gebruik" style="display:none;">Gebruiken</button>
+    <button type="button" id="opnieuw" style="display:none;">Opnieuw</button>
+    <button type="button" id="annuleer">Annuleren</button>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const doel = new URLSearchParams(location.search).get('doel') || '';
+$('titel').textContent = doel === 'obj' ? 'Foto van het apparaat' : doel === 'plate' ? 'Foto van het typeplaatje' : doel === 'extra' ? 'Extra foto' : 'Foto maken';
+let stream = null, foto = null;
+
+function toonFout(t){ $('fout').textContent = t || ''; $('fout').style.display = t ? 'block' : 'none'; }
+function stopStream(){ if(stream){ stream.getTracks().forEach(t => t.stop()); stream = null; } $('video').srcObject = null; }
+
+async function start(deviceId){
+  stopStream(); toonFout(''); $('neem').disabled = true;
+  if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)){
+    toonFout('Deze browser geeft geen toegang tot de camera. Gebruik Chrome of Edge en open de pagina via https.'); return;
+  }
+  try{
+    const video = deviceId ? {deviceId:{exact:deviceId}, width:{ideal:1920}, height:{ideal:1080}} : {width:{ideal:1920}, height:{ideal:1080}};
+    stream = await navigator.mediaDevices.getUserMedia({video, audio:false});
+    $('video').srcObject = stream;
+    await $('video').play().catch(() => {});
+    const cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+    const sel = $('keuze'), actief = stream.getVideoTracks()[0].getSettings().deviceId;
+    sel.innerHTML = '';
+    cams.forEach((d, i) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || ('Camera ' + (i + 1)); if(d.deviceId === actief) o.selected = true; sel.appendChild(o); });
+    sel.style.display = cams.length > 1 ? 'block' : 'none';
+    $('neem').disabled = false;
+  }catch(err){
+    const n = err && err.name;
+    toonFout(n === 'NotAllowedError' || n === 'SecurityError'
+      ? 'De camera is niet toegestaan. Klik in de adresbalk op het camera-icoon en kies Toestaan, en laad de pagina opnieuw. Controleer ook Windows: Instellingen > Privacy en beveiliging > Camera.'
+      : n === 'NotFoundError' || n === 'OverconstrainedError'
+        ? 'Er is geen camera gevonden.'
+        : n === 'NotReadableError'
+          ? 'De camera is in gebruik door een ander programma. Sluit dat programma en probeer opnieuw.'
+          : 'De camera kon niet worden gestart (' + ((err && err.message) || n || 'onbekende fout') + ').');
+  }
+}
+
+function neemFoto(){
+  const v = $('video');
+  if(!v.videoWidth) return;
+  const s = Math.min(1, 1280 / Math.max(v.videoWidth, v.videoHeight));
+  const c = document.createElement('canvas');
+  c.width = Math.round(v.videoWidth * s); c.height = Math.round(v.videoHeight * s);
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  const d = c.toDataURL('image/jpeg', 0.82);
+  foto = {mime:'image/jpeg', data:d.split(',')[1]};
+  $('voorbeeld').src = d; $('voorbeeld').style.display = 'block';
+  $('video').style.display = 'none'; $('keuze').style.display = 'none';
+  $('neem').style.display = 'none'; $('gebruik').style.display = ''; $('opnieuw').style.display = '';
+}
+function opnieuw(){
+  foto = null;
+  $('voorbeeld').style.display = 'none'; $('video').style.display = 'block';
+  $('neem').style.display = ''; $('gebruik').style.display = 'none'; $('opnieuw').style.display = 'none';
+  $('info').style.display = 'none'; $('dl').style.display = 'none'; toonFout('');
+  start($('keuze').value || null);
+}
+function gebruik(){
+  if(!foto) return;
+  if(window.opener && !window.opener.closed){
+    try{
+      window.opener.postMessage({type:'rc-foto', doel:doel, mime:foto.mime, data:foto.data}, '*');
+      stopStream(); window.close();
+      // sluiten lukt niet altijd; dan blijft dit bericht staan
+      $('info').textContent = 'De foto is verstuurd. Je mag dit venster sluiten.'; $('info').style.display = 'block';
+      return;
+    }catch(e){}
+  }
+  // geen verbinding met de app: foto laten opslaan, dan kan hij als bestand gekozen worden
+  $('dl').href = 'data:image/jpeg;base64,' + foto.data; $('dl').style.display = 'inline';
+  toonFout('Dit venster is losgekoppeld van de app. Sla de foto op en kies hem in de Diagnosehulp als bestand.');
+}
+
+$('neem').addEventListener('click', neemFoto);
+$('gebruik').addEventListener('click', gebruik);
+$('opnieuw').addEventListener('click', opnieuw);
+$('annuleer').addEventListener('click', () => { stopStream(); window.close(); });
+$('keuze').addEventListener('change', e => start(e.target.value));
+window.addEventListener('keydown', e => { if(e.key === 'Escape'){ stopStream(); window.close(); } });
+window.addEventListener('beforeunload', stopStream);
+start(null);
+</script>
+</body>
+</html>
